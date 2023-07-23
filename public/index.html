@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Simple Chat App</title>
+  </head>
+  <body>
+    <div id="login">
+      <input id="username-input" placeholder="Enter your username" />
+      <button id="login-button">Login</button>
+    </div>
+    <div id="chat" style="display: none">
+      <h3>Online Users:</h3>
+      <ul id="user-list"></ul>
+      <hr />
+      <h3>Public Chat:</h3>
+      <ul id="public-messages"></ul>
+      <form id="message-form">
+        <input id="input-message" autocomplete="off" /><button>Send</button>
+      </form>
+      <hr />
+      <h3>Private Chat:</h3>
+      <ul id="private-messages"></ul>
+      <div id="typing-indicator"></div>
+      <input id="to-user-input" placeholder="Enter recipient username" />
+      <input id="private-message-input" placeholder="Enter private message" />
+      <button id="private-message-button">Send Private Message</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+
+      const loginDiv = document.getElementById("login");
+      const chatDiv = document.getElementById("chat");
+      const usernameInput = document.getElementById("username-input");
+      const loginButton = document.getElementById("login-button");
+      const userList = document.getElementById("user-list");
+      const publicMessagesList = document.getElementById("public-messages");
+      const messageForm = document.getElementById("message-form");
+      const messageInput = document.getElementById("input-message");
+      const privateMessagesList = document.getElementById("private-messages");
+      const typingIndicator = document.getElementById("typing-indicator");
+      const toUserInput = document.getElementById("to-user-input");
+      const privateMessageInput = document.getElementById(
+        "private-message-input"
+      );
+      const privateMessageButton = document.getElementById(
+        "private-message-button"
+      );
+
+      loginButton.addEventListener("click", (e) => {
+        e.preventDefault();
+        const username = usernameInput.value;
+        if (username.trim()) {
+          socket.emit("login", username);
+          loginDiv.style.display = "none";
+          chatDiv.style.display = "block";
+        }
+      });
+
+      messageForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const message = messageInput.value;
+        if (message.trim()) {
+          socket.emit("chat message", message);
+          messageInput.value = "";
+        }
+      });
+
+      privateMessageButton.addEventListener("click", (e) => {
+        e.preventDefault();
+        const to = toUserInput.value;
+        const message = privateMessageInput.value;
+        if (to.trim() && message.trim()) {
+          socket.emit("private-message", { to, message });
+          privateMessageInput.value = "";
+          displayPrivateMessage(`To ${to}: ${message}`);
+        }
+      });
+
+      let isTyping = false;
+      let typingTimeout;
+
+      messageInput.addEventListener("input", () => {
+        clearTimeout(typingTimeout);
+        if (!isTyping) {
+          socket.emit("typing");
+          isTyping = true;
+        }
+        typingTimeout = setTimeout(() => {
+          socket.emit("stop typing");
+          isTyping = false;
+        }, 1000);
+      });
+
+      socket.on("user-typing", (username) => {
+        typingIndicator.textContent = `${username} is typing...`;
+      });
+
+      socket.on("user-stop-typing", () => {
+        typingIndicator.textContent = "";
+      });
+
+      socket.on("chat message", (message) => {
+        displayPublicMessage(message);
+      });
+
+      socket.on("user-list", (users) => {
+        userList.innerHTML = "";
+        users.forEach((username) => {
+          const li = document.createElement("li");
+          li.textContent = username;
+          userList.appendChild(li);
+        });
+      });
+
+      socket.on("private-message", ({ from, message }) => {
+        displayPrivateMessage(`From ${from}: ${message}`);
+      });
+
+      async function saveMessageToDB(messageData) {
+        const response = await fetch("/save-message", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(messageData),
+        });
+        if (!response.ok) {
+          console.error("Failed to save message to the database");
+        }
+      }
+
+      async function displayPublicMessage(message) {
+        const li = document.createElement("li");
+        li.textContent = message;
+        publicMessagesList.appendChild(li);
+        // Save the public message to the database
+        await saveMessageToDB({ content: message, from: "You", to: "public" });
+      }
+
+      async function displayPrivateMessage(message) {
+        const li = document.createElement("li");
+        li.textContent = message;
+        privateMessagesList.appendChild(li);
+        // Save the private message to the database
+        const from = message.includes("You")
+          ? "You"
+          : message.substring(5, message.indexOf(":"));
+        const to = message.includes("You")
+          ? message.substring(3, message.indexOf(":"))
+          : "You";
+        const privateMessage = {
+          content: message.substring(message.indexOf(":") + 2),
+          from,
+          to,
+        };
+        await saveMessageToDB(privateMessage);
+      }
+    </script>
+  </body>
+</html>
